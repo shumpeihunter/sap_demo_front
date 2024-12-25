@@ -36,7 +36,7 @@ const SAPChat = () => {
     formData.append('user_query', userMessage);
 
     try {
-      const response = await fetch('http://localhost:5000/chat-ai', {
+      const response = await fetch('https://dz992silxsfizx-5000.proxy.runpod.net/chat-ai', {
         method: 'POST',
         body: formData,
       });
@@ -88,7 +88,7 @@ const SAPChat = () => {
                 ...prev,
                 {
                   type: 'assistant',
-                  content: `AI応答生成概要: ${preview} ...`,
+                  content: `1次AI応答生成概要: ${preview} ...`,
                   isSystemMessage: true,
                 },
                 
