@@ -1,6 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader } from 'lucide-react';
 
+// react-markdown, syntax-highlighter 関連のインポート
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
+
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
+import js from 'react-syntax-highlighter/dist/esm/languages/hljs/javascript';
+import { atomOneLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+
+SyntaxHighlighter.registerLanguage('javascript', js);
+
 const SAPChat = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -36,6 +47,7 @@ const SAPChat = () => {
     formData.append('user_query', userMessage);
 
     try {
+      // サーバーからストリーミングで応答を受け取る例
       const response = await fetch('https://dz992silxsfizx-5000.proxy.runpod.net/chat-ai', {
         method: 'POST',
         body: formData,
@@ -62,12 +74,9 @@ const SAPChat = () => {
             // JSON としてパースを試みる
             const data = JSON.parse(line);
 
-            // 中間レスポンスかどうかを判定
             if (data.type === 'intermediate') {
               // 検索データ取得完了フラグ
               setProgress((prev) => ({ ...prev, searchData: true }));
-
-              // 検索データの概要を小さく薄い文字で表示する例
               const preview1 = data.data_from1?.slice(0, 50) || '';
               const preview2 = data.data_from_qa_new?.slice(0, 50) || '';
               setMessages((prev) => [
@@ -81,8 +90,6 @@ const SAPChat = () => {
             } else if (data.type === 'after_request_gemini') {
               // AI応答生成開始フラグ
               setProgress((prev) => ({ ...prev, geminiResponse: true }));
-
-              // AI 応答の生成内容の一部を小さく表示する例
               const preview = data.gemini_response?.slice(0, 50) || '';
               setMessages((prev) => [
                 ...prev,
@@ -91,22 +98,20 @@ const SAPChat = () => {
                   content: `1次AI応答生成概要: ${preview} ...`,
                   isSystemMessage: true,
                 },
-                
               ]);
               setIsLoading(false);
             } else {
-              // その他の JSON で返す可能性があればここで処理
-              // 今回はとくにない想定
+              // その他の JSON 形式
             }
           } catch (err) {
-            // JSON パースに失敗したら → ストリーミングテキスト扱い
+            // JSON でない場合、ストリーミングテキストとして扱う
             setMessages((prev) => {
               const lastMessage = prev[prev.length - 1];
               // 直前がストリーミング中のアシスタントメッセージなら結合
               if (lastMessage?.type === 'assistant' && lastMessage.isStreaming) {
                 return [
                   ...prev.slice(0, -1),
-                  { ...lastMessage, content: lastMessage.content + line },
+                  { ...lastMessage, content: lastMessage.content + '\n' + line },
                 ];
               } else {
                 // 新たなメッセージとして追加
@@ -151,16 +156,36 @@ const SAPChat = () => {
                     ${isSystem ? 'text-xs text-gray-400 bg-transparent' : ''}
                   `}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  {/* ReactMarkdown で描画 */}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                    components={{
+                      code({ node, inline, className, children, ...props }) {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return !inline && match ? (
+                          <SyntaxHighlighter
+                            language={match[1]}
+                            style={atomOneLight}
+                            PreTag="div"
+                            {...props}
+                          >
+                            {String(children).replace(/\n$/, '')}
+                          </SyntaxHighlighter>
+                        ) : (
+                          <code className={className} {...props}>
+                            {children}
+                          </code>
+                        );
+                      },
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
                 </div>
               </div>
 
-              {/* 
-                ローディング表示を、
-                「最後のユーザーメッセージ」かつ「isLoading が true」かつ
-                「今まさにアシスタント応答を待っている」状態で挿入するイメージ
-              */}
-              {isLoading &&  index === messages.length - 1 && (
+              {/* ローディング表示 */}
+              {isLoading && index === messages.length - 1 && (
                 <div className="space-y-2 text-sm text-gray-500 mt-2">
                   {/* 検索データ */}
                   <div className="flex items-center space-x-2">
@@ -178,7 +203,9 @@ const SAPChat = () => {
                   <div className="flex items-center space-x-2">
                     <Loader
                       className={`w-4 h-4 ${
-                        progress.geminiResponse ? 'text-green-500' : 'animate-spin'
+                        progress.geminiResponse
+                          ? 'text-green-500'
+                          : 'animate-spin'
                       }`}
                     />
                     <span>1次AI応答を生成中...</span>
