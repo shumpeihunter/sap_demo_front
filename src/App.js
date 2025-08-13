@@ -1,246 +1,421 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader } from 'lucide-react';
+import React, { useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import './App.css';
 
-// react-markdown, syntax-highlighter 関連のインポート
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
-
-import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
-import js from 'react-syntax-highlighter/dist/esm/languages/hljs/javascript';
-import { atomOneLight } from 'react-syntax-highlighter/dist/esm/styles/hljs';
-
-SyntaxHighlighter.registerLanguage('javascript', js);
-
-const SAPChat = () => {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState({
-    searchData: false,
-    geminiResponse: false,
+export default function MarketForecastChart() {
+  const [marketData, setMarketData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [showChart, setShowChart] = useState(false);
+  const [testMode, setTestMode] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  
+  // フォーム入力の状態
+  const [formData, setFormData] = useState({
+    company: '',
+    service: '',
+    market: ''
   });
 
-  const messagesEndRef = useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // サンプルJSON
+  const sampleJson = {
+    "2019": 1200,
+    "2020": 1150,
+    "2021": 1180,
+    "2022": 1220,
+    "2023": 1250,
+    "2024": 1280,
+    "2025": 1310,
+    "2026": 1340,
+    "2027": 1375,
+    "y-axis_units": "億円",
+    "market_predict_summary": "婦人靴市場は2023年の1,250億円から、2027年には1,375億円へと成長が見込まれています。年平均成長率は約2.4%となり、安定した成長が期待されます。",
+    "market_summary": "国内婦人靴市場は、EC化の進展と高付加価値商品の需要増により堅調に推移しています。特に機能性とファッション性を両立した商品カテゴリーが市場を牽引しています。",
+    "source_url": ["https://example.com/market-report", "https://example2.com/fashion-data"]
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  // フォーム入力の処理
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-
-    const userMessage = input;
-    setInput('');
-    setIsLoading(true);
-    setProgress({ searchData: false, geminiResponse: false });
-
-    // ユーザーの入力をチャットに追加
-    setMessages((prev) => [...prev, { type: 'user', content: userMessage }]);
-
-    const formData = new FormData();
-    formData.append('user_query', userMessage);
-
+  // JSONテストモードでの処理
+  const handleTestSubmit = () => {
     try {
-      // サーバーからストリーミングで応答を受け取る例
-      const response = await fetch('https://dz992silxsfizx-5000.proxy.runpod.net/chat-ai', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // ストリームで受け取ったデータをテキストに変換
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        // 最後の行は途中かもしれないので残しておく
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue; // 空行はスキップ
-
-          try {
-            // JSON としてパースを試みる
-            const data = JSON.parse(line);
-
-            if (data.type === 'intermediate') {
-              // 検索データ取得完了フラグ
-              setProgress((prev) => ({ ...prev, searchData: true }));
-              const preview1 = data.data_from1?.slice(0, 50) || '';
-              const preview2 = data.data_from_qa_new?.slice(0, 50) || '';
-              setMessages((prev) => [
-                ...prev,
-                {
-                  type: 'assistant',
-                  content: `検索データ概要: ${preview1} ... / ${preview2} ...`,
-                  isSystemMessage: true,
-                },
-              ]);
-            } else if (data.type === 'after_request_gemini') {
-              // AI応答生成開始フラグ
-              setProgress((prev) => ({ ...prev, geminiResponse: true }));
-              const preview = data.gemini_response?.slice(0, 50) || '';
-              setMessages((prev) => [
-                ...prev,
-                {
-                  type: 'assistant',
-                  content: `1次AI応答生成概要: ${preview} ...`,
-                  isSystemMessage: true,
-                },
-              ]);
-              setIsLoading(false);
-            } else {
-              // その他の JSON 形式
-            }
-          } catch (err) {
-            // JSON でない場合、ストリーミングテキストとして扱う
-            setMessages((prev) => {
-              const lastMessage = prev[prev.length - 1];
-              // 直前がストリーミング中のアシスタントメッセージなら結合
-              if (lastMessage?.type === 'assistant' && lastMessage.isStreaming) {
-                return [
-                  ...prev.slice(0, -1),
-                  { ...lastMessage, content: lastMessage.content + '\n' + line },
-                ];
-              } else {
-                // 新たなメッセージとして追加
-                return [
-                  ...prev,
-                  { type: 'assistant', content: line, isStreaming: true },
-                ];
-              }
-            });
-          }
-        }
+      if (!jsonInput.trim()) {
+        setError('JSONデータを入力してください。');
+        return;
       }
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      // 最終的に isStreaming を false に変更
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.isStreaming ? { ...msg, isStreaming: false } : msg
-        )
-      );
+
+      const parsedData = JSON.parse(jsonInput);
+      setMarketData(parsedData);
+      setShowChart(true);
+      setError(null);
+    } catch (err) {
+      setError('無効なJSON形式です。正しいJSON形式で入力してください。');
     }
   };
 
-  return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
-      <div className="flex-1 overflow-y-auto mb-4 space-y-4">
-        {messages.map((message, index) => {
-          const isUser = message.type === 'user';
-          const isSystem = message.isSystemMessage;
+  // フォーム送信の処理
+  const handleSubmit = async () => {
+    if (!formData.company || !formData.service || !formData.market) {
+      setError('すべての項目を入力してください。');
+      return;
+    }
 
-          return (
-            <React.Fragment key={index}>
-              {/* チャットバブル */}
-              <div
-                className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`
-                    max-w-[80%] rounded-lg p-3
-                    ${isUser ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'}
-                    ${isSystem ? 'text-xs text-gray-400 bg-transparent' : ''}
-                  `}
-                >
-                  {/* ReactMarkdown で描画 */}
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm, remarkBreaks]}
-                    components={{
-                      code({ node, inline, className, children, ...props }) {
-                        const match = /language-(\w+)/.exec(className || '');
-                        return !inline && match ? (
-                          <SyntaxHighlighter
-                            language={match[1]}
-                            style={atomOneLight}
-                            PreTag="div"
-                            {...props}
-                          >
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        );
-                      },
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
+    setLoading(true);
+    setError(null);
+    setShowChart(false);
+
+    try {
+      const response = await fetch('https://satyr-teaching-ghastly.ngrok-free.app/api/search_market', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          company: formData.company,
+          service: formData.service,
+          market: formData.market
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setMarketData(data);
+      setShowChart(true);
+      setLoading(false);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  // リセット処理
+  const handleReset = () => {
+    setFormData({ company: '', service: '', market: '' });
+    setMarketData(null);
+    setShowChart(false);
+    setError(null);
+    setJsonInput('');
+  };
+
+  // サンプルJSONを挿入
+  const insertSampleJson = () => {
+    setJsonInput(JSON.stringify(sampleJson, null, 2));
+  };
+
+  // グラフデータの準備
+  const prepareChartData = () => {
+    if (!marketData) return [];
+
+    const years = Object.keys(marketData)
+      .filter(key => /^\d{4}$/.test(key))
+      .sort();
+    
+    const actualYearIndex = years.indexOf('2023');
+    
+    return years.map((year, index) => ({
+      year,
+      actual: index <= actualYearIndex ? marketData[year] : null,
+      forecast: index > actualYearIndex ? marketData[year] : null
+    }));
+  };
+
+  // カスタムツールチップ
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const units = marketData?.['y-axis_units'] || '億円';
+      return (
+        <div className="custom-tooltip">
+          <p className="tooltip-label">{`${label}年`}</p>
+          {payload.map((entry, index) => (
+            <p key={index} style={{ color: entry.color }} className="tooltip-item">
+              {`${entry.dataKey === 'actual' ? '実績' : '予測'}: ${entry.value?.toLocaleString()} ${units}`}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-container">
+        <div className="loading-content">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">データを読み込んでいます...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-container">
+      <div className="content-wrapper">
+        {/* モード切替 */}
+        <div className="mode-toggle-container">
+          <div className="mode-toggle-group" role="group">
+            <button
+              type="button"
+              onClick={() => {setTestMode(false); handleReset();}}
+              className={`mode-toggle-button mode-toggle-left ${!testMode ? 'active' : ''}`}
+            >
+              通常モード（API）
+            </button>
+            <button
+              type="button"
+              onClick={() => {setTestMode(true); handleReset();}}
+              className={`mode-toggle-button mode-toggle-right ${testMode ? 'active' : ''}`}
+            >
+              テストモード（JSON入力）
+            </button>
+          </div>
+        </div>
+
+        {/* 入力フォーム */}
+        <div className="form-card">
+          <h1 className="main-title">
+            市場予測分析システム
+          </h1>
+          
+          <div>
+            {!testMode ? (
+              // 通常モード
+              <>
+                <div className="input-grid">
+                  <div className="input-group">
+                    <label htmlFor="company" className="input-label">
+                      会社名
+                    </label>
+                    <input
+                      type="text"
+                      id="company"
+                      name="company"
+                      value={formData.company}
+                      onChange={handleInputChange}
+                      className="input-field"
+                      placeholder="例: ダイアナ"
+                    />
+                  </div>
+                  
+                  <div className="input-group">
+                    <label htmlFor="service" className="input-label">
+                      サービス・商品
+                    </label>
+                    <input
+                      type="text"
+                      id="service"
+                      name="service"
+                      value={formData.service}
+                      onChange={handleInputChange}
+                      className="input-field"
+                      placeholder="例: 靴"
+                    />
+                  </div>
+                  
+                  <div className="input-group">
+                    <label htmlFor="market" className="input-label">
+                      市場
+                    </label>
+                    <input
+                      type="text"
+                      id="market"
+                      name="market"
+                      value={formData.market}
+                      onChange={handleInputChange}
+                      className="input-field"
+                      placeholder="例: 婦人靴"
+                    />
+                  </div>
                 </div>
+
+                {error && (
+                  <div className="error-message">
+                    {error}
+                  </div>
+                )}
+
+                <div className="button-container">
+                  <button
+                    onClick={handleSubmit}
+                    className="button button-primary"
+                    disabled={loading}
+                  >
+                    分析開始
+                  </button>
+                  
+                  {showChart && (
+                    <button
+                      onClick={handleReset}
+                      className="button button-secondary"
+                    >
+                      リセット
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              // テストモード
+              <>
+                <div className="json-input-container">
+                  <div className="json-input-header">
+                    <label className="input-label">
+                      JSONデータ入力
+                    </label>
+                    <button
+                      onClick={insertSampleJson}
+                      className="sample-json-button"
+                    >
+                      サンプルJSON挿入
+                    </button>
+                  </div>
+                  <textarea
+                    value={jsonInput}
+                    onChange={(e) => setJsonInput(e.target.value)}
+                    className="json-textarea"
+                    placeholder='JSONデータを入力してください。例：
+{
+  "2019": 1200,
+  "2020": 1150,
+  "2021": 1180,
+  "2022": 1220,
+  "2023": 1250,
+  "2024": 1280,
+  "2025": 1310,
+  "y-axis_units": "億円",
+  "market_predict_summary": "市場予測の要約",
+  "market_summary": "市場の概要",
+  "source_url": ["https://example.com"]
+}'
+                  />
+                </div>
+
+                {error && (
+                  <div className="error-message">
+                    {error}
+                  </div>
+                )}
+
+                <div className="button-container">
+                  <button
+                    onClick={handleTestSubmit}
+                    className="button button-primary"
+                  >
+                    グラフ表示
+                  </button>
+                  
+                  {showChart && (
+                    <button
+                      onClick={handleReset}
+                      className="button button-secondary"
+                    >
+                      リセット
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* チャート表示 */}
+        {showChart && marketData && (
+          <div className="chart-card">
+            <div className="chart-header">
+              <h2 className="chart-title">
+                市場規模の推移と将来予測
+              </h2>
+              {!testMode && (
+                <p className="chart-subtitle">
+                  {formData.company} - {formData.service} - {formData.market}
+                </p>
+              )}
+            </div>
+
+            <div className="chart-content-area">
+              {marketData?.market_predict_summary && (
+                <p className="summary-box">
+                  {marketData.market_predict_summary}
+                </p>
+              )}
+
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={prepareChartData()} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="year" />
+                    <YAxis 
+                      tickFormatter={(value) => value.toLocaleString()}
+                      label={{ 
+                        value: `市場規模（${marketData?.['y-axis_units'] || '億円'}）`, 
+                        angle: -90, 
+                        position: 'insideLeft' 
+                      }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend />
+                    <Bar 
+                      dataKey="actual" 
+                      fill="rgba(229, 9, 20, 0.8)" 
+                      name="市場規模（実績）"
+                    />
+                    <Bar 
+                      dataKey="forecast" 
+                      fill="rgba(229, 9, 20, 0.4)" 
+                      name="市場規模（予測）"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
 
-              {/* ローディング表示 */}
-              {isLoading && index === messages.length - 1 && (
-                <div className="space-y-2 text-sm text-gray-500 mt-2">
-                  {/* 検索データ */}
-                  <div className="flex items-center space-x-2">
-                    <Loader
-                      className={`w-4 h-4 ${
-                        progress.searchData ? 'text-green-500' : 'animate-spin'
-                      }`}
-                    />
-                    <span>検索データを取得中...</span>
-                    {progress.searchData && (
-                      <span className="text-green-500">✓</span>
-                    )}
-                  </div>
-                  {/* AI応答 */}
-                  <div className="flex items-center space-x-2">
-                    <Loader
-                      className={`w-4 h-4 ${
-                        progress.geminiResponse
-                          ? 'text-green-500'
-                          : 'animate-spin'
-                      }`}
-                    />
-                    <span>1次AI応答を生成中...</span>
-                    {progress.geminiResponse && (
-                      <span className="text-green-500">✓</span>
-                    )}
-                  </div>
+              {marketData?.source_url && marketData.source_url.length > 0 && (
+                <div className="source-info">
+                  <p>
+                    出典: 
+                    {marketData.source_url.map((url, index) => (
+                      <span key={index}>
+                        {index > 0 && ', '}
+                        <a 
+                          href={url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="source-link"
+                        >
+                          {new URL(url).hostname}
+                        </a>
+                      </span>
+                    ))}
+                  </p>
                 </div>
               )}
-            </React.Fragment>
-          );
-        })}
-        <div ref={messagesEndRef} />
-      </div>
+            </div>
+          </div>
+        )}
 
-      {/* 入力フォーム */}
-      <form onSubmit={handleSubmit} className="flex space-x-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="SAPについて質問してください..."
-          className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          disabled={isLoading}
-        />
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-        >
-          <Send className="w-5 h-5" />
-        </button>
-      </form>
+        {/* 市場サマリー情報 */}
+        {showChart && marketData?.market_summary && (
+          <div className="summary-card">
+            <h3 className="summary-title">市場概況</h3>
+            <p className="summary-text">
+              {marketData.market_summary}
+            </p>
+            {marketData['y-axis_units'] && (
+              <p className="summary-note">
+                ※ 数値の単位: {marketData['y-axis_units']}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
-};
-
-export default SAPChat;
+}
